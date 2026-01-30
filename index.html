@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emergency Plan</title>
+
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#2f80ed">
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#f2f4f7;padding:8px}
+h1{text-align:center;margin:6px 0}
+
+.controls,.tabs{
+  display:flex;
+  gap:4px;
+  flex-wrap:wrap;
+  margin-bottom:6px;
+}
+
+button,select{
+  padding:6px;
+  font-size:12px;
+}
+
+.tabs button{
+  flex:1;
+  border:none;
+  border-radius:5px;
+  background:#ddd;
+}
+.tabs button.active{
+  background:#2f80ed;
+  color:#fff;
+}
+
+section{display:none}
+section.active{display:block}
+
+.item{
+  display:flex;
+  align-items:center;
+  gap:4px;
+  background:#fff;
+  padding:4px;
+  border-radius:5px;
+  margin-bottom:3px;
+}
+.item.have{background:#d4edda}
+
+.item input[type=text]{width:100px}
+.item input[type=number]{width:40px}
+
+#marked{
+  background:#e9f7ef;
+  padding:6px;
+  border-radius:5px;
+  margin-top:6px;
+}
+</style>
+</head>
+
+<body>
+
+<h1>🛡 Emergency Plan</h1>
+
+<div class="controls">
+  <select id="hours">
+    <option value="24">24 hours</option>
+    <option value="48">48 hours</option>
+    <option value="72" selected>72 hours</option>
+  </select>
+
+  <button onclick="showMissing()">Missing</button>
+  <button onclick="showAll()">All</button>
+  <button onclick="exportXLSX()">Excel</button>
+  <button onclick="exportPDF()">PDF</button>
+  <button onclick="exportChecklist()">Checklist</button>
+  <button onclick="resetData()">Reset</button>
+</div>
+
+<div class="tabs">
+  <button data-tab="home">🏠 Home</button>
+  <button data-tab="evac">🎒 Evacuation</button>
+  <button data-tab="car">🚗 Car</button>
+</div>
+
+<section id="home"></section>
+<section id="evac"></section>
+<section id="car"></section>
+
+<div id="marked"></div>
+
+<script>
+let hours="72";
+
+const baseData={
+ home:{title:"🏠 Home",items:[
+  {name:"Water (L)",base:3,perDay:true},
+  {name:"Food",base:2,perDay:true},
+  {name:"First aid kit",base:1,perDay:false}
+ ]},
+ evac:{title:"🎒 Evacuation",items:[
+  {name:"Documents",base:1,perDay:false},
+  {name:"Water (L)",base:2,perDay:true}
+ ]},
+ car:{title:"🚗 Car",items:[
+  {name:"Car first aid kit",base:1,perDay:false},
+  {name:"Blanket",base:2,perDay:false}
+ ]}
+};
+
+let data=JSON.parse(localStorage.getItem("emergency_plan"))
+  || JSON.parse(JSON.stringify(baseData));
+
+["home","evac","car"].forEach(s=>{
+ data[s].items.forEach(i=>{
+  if(!i.checked) i.checked={24:false,48:false,72:false};
+ });
+});
+
+function save(){
+ localStorage.setItem("emergency_plan",JSON.stringify(data));
+}
+
+function qty(i){
+ return i.perDay ? Math.ceil(i.base*(hours/24)) : i.base;
+}
+
+function render(){
+ ["home","evac","car"].forEach(sec=>{
+  const el=document.getElementById(sec);
+  el.innerHTML=`<h3>${data[sec].title}</h3>`;
+
+  data[sec].items.forEach((i,idx)=>{
+   const d=document.createElement("div");
+   d.className="item"+(i.checked[hours]?" have":"");
+   d.innerHTML=`
+    <input type="checkbox" ${i.checked[hours]?"checked":""}>
+    <input type="text" value="${i.name}">
+    <input type="number" value="${qty(i)}">
+    <input type="checkbox" ${i.perDay?"checked":""}>/day
+    <button>🗑</button>
+   `;
+
+   d.children[0].onchange=e=>{
+    i.checked[hours]=e.target.checked;
+    save();render();
+   };
+   d.children[1].onchange=e=>{
+    i.name=e.target.value;save();
+   };
+   d.children[2].onchange=e=>{
+    const v=Number(e.target.value);
+    if(v>0){
+     i.base=i.perDay?Math.ceil(v/(hours/24)):v;
+     save();render();
+    }
+   };
+   d.children[3].onchange=e=>{
+    i.perDay=e.target.checked;
+    save();render();
+   };
+   d.children[4].onclick=()=>{
+    data[sec].items.splice(idx,1);
+    save();render();
+   };
+
+   el.appendChild(d);
+  });
+
+  const add=document.createElement("button");
+  add.textContent="+ Add item";
+  add.onclick=()=>addItem(sec);
+  el.appendChild(add);
+ });
+
+ renderMarked();
+}
+
+function addItem(sec){
+ const name=prompt("Item name","");
+ if(!name) return;
+ data[sec].items.push({
+  name,
+  base:1,
+  perDay:false,
+  checked:{24:false,48:false,72:false}
+ });
+ save();render();
+}
+
+function renderMarked(){
+ const m=document.getElementById("marked");
+ m.innerHTML="<b>Checked items:</b><br>";
+ ["home","evac","car"].forEach(s=>{
+  data[s].items.forEach(i=>{
+   if(i.checked[hours]){
+    m.innerHTML+=`${data[s].title} — ${i.name} (${qty(i)})<br>`;
+   }
+  });
+ });
+}
+
+function showMissing(){
+ document.querySelectorAll(".item").forEach(i=>{
+  i.style.display=i.classList.contains("have")?"none":"flex";
+ });
+}
+function showAll(){
+ document.querySelectorAll(".item").forEach(i=>i.style.display="flex");
+}
+
+function resetData(){
+ if(confirm("Reset to default?")){
+  data=JSON.parse(JSON.stringify(baseData));
+  ["home","evac","car"].forEach(s=>{
+   data[s].items.forEach(i=>i.checked={24:false,48:false,72:false});
+  });
+  save();render();
+ }
+}
+
+document.getElementById("hours").onchange=e=>{
+ hours=e.target.value;
+ render();
+};
+
+/* ===== EXPORTS ===== */
+
+// XLSX — ALL ITEMS
+function exportXLSX(){
+ const rows=[["Type","Item","24h","48h","72h","Per day"]];
+ const icon={home:"🏠",evac:"🎒",car:"🚗"};
+
+ ["home","evac","car"].forEach(s=>{
+  data[s].items.forEach(i=>{
+   rows.push([
+    icon[s],
+    i.name,
+    i.perDay?i.base*1:i.base,
+    i.perDay?i.base*2:i.base,
+    i.perDay?i.base*3:i.base,
+    i.perDay?"yes":"no"
+   ]);
+  });
+ });
+
+ const ws=XLSX.utils.aoa_to_sheet(rows);
+ ws["!cols"]=[{wch:6},{wch:30},{wch:8},{wch:8},{wch:8},{wch:10}];
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,"Plan");
+ XLSX.writeFile(wb,"emergency_plan.xlsx");
+}
+
+// PDF — CURRENT VIEW
+function exportPDF(){
+ const {jsPDF}=window.jspdf;
+ const pdf=new jsPDF();
+ let y=10;
+
+ pdf.setFontSize(14);
+ pdf.text(`Emergency Plan (${hours}h)`,10,y);y+=8;
+ pdf.setFontSize(11);
+
+ ["home","evac","car"].forEach(s=>{
+  pdf.text(data[s].title,10,y);y+=6;
+  data[s].items.forEach(i=>{
+   const m=i.checked[hours]?"[x]":"[ ]";
+   pdf.text(`${m} ${i.name} — ${qty(i)}`,12,y);
+   y+=5;
+   if(y>280){pdf.addPage();y=10;}
+  });
+  y+=4;
+ });
+
+ pdf.save(`plan_${hours}h.pdf`);
+}
+
+// XLSX — CLEAN CHECKLIST
+function exportChecklist(){
+ const rows=[["Have","Item","Qty","Per day"]];
+ ["home","evac","car"].forEach(s=>{
+  rows.push(["",data[s].title,"",""]);
+  data[s].items.forEach(i=>{
+   rows.push(["[ ]",i.name,qty(i),i.perDay?"yes":"no"]);
+  });
+ });
+ const ws=XLSX.utils.aoa_to_sheet(rows);
+ ws["!cols"]=[{wch:6},{wch:35},{wch:8},{wch:10}];
+ const wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,"Checklist");
+ XLSX.writeFile(wb,`checklist_${hours}h.xlsx`);
+}
+
+/* Tabs */
+document.querySelectorAll(".tabs button").forEach(b=>{
+ b.onclick=()=>{
+  document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));
+  document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+  document.getElementById(b.dataset.tab).classList.add("active");
+  b.classList.add("active");
+ };
+});
+
+render();
+document.querySelector(".tabs button").click();
+</script>
+
+</body>
+</html>
